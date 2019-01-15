@@ -142,8 +142,8 @@ defmodule ClickhouseEcto.QueryString do
     expr(literal, sources, query)
   end
 
-  def expr({:^, [], [_ix]}, _sources, _query) do
-    [??]
+  def expr({:^, [], [ix]}, _sources, _query) do
+    [??, Integer.to_string(ix)]
   end
 
   def expr({{:., _, [{:&, _, [idx]}, field]}, _, []}, sources, _query) when is_atom(field) do
@@ -174,9 +174,14 @@ defmodule ClickhouseEcto.QueryString do
     "0=1"
   end
 
-  def expr({:in, _, [left, {:^, _, [_, length]}]}, sources, query) do
-    args = Enum.intersperse(List.duplicate(??, length), ?,)
-    [expr(left, sources, query), " IN (", args, ?)]
+  def expr({:in, _, [left, {:^, _, [ix, length]}]}, sources, query) do
+    placeholders =
+      ix
+      |> Range.new(ix + length - 1)
+      |> Enum.map(fn i -> [??, Integer.to_string(i)] end)
+      |> Enum.intersperse(",")
+
+    [expr(left, sources, query), " IN (", placeholders, ")"]
   end
 
   def expr({:in, _, [left, right]}, sources, query) do

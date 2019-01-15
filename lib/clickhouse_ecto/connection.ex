@@ -22,8 +22,12 @@ defmodule ClickhouseEcto.Connection do
   @spec prepare_execute(connection :: DBConnection.t, name :: String.t, prepared, params :: [term], options :: Keyword.t) ::
   {:ok, query :: map, term} | {:error, Exception.t}
   def prepare_execute(conn, name, prepared_query, params, options) do
-    query = %Query{name: name, statement: prepared_query}
-    case DBConnection.prepare_execute(conn, query, params, options) do
+    statement = sanitise_query(prepared_query)
+    ordered_params = order_params(prepared_query, params)
+
+    query = %Query{name: name, statement: statement}
+
+    case DBConnection.prepare_execute(conn, query, ordered_params, options) do
       {:ok, query, result} ->
         {:ok, %{query | statement: prepared_query}, process_rows(result, options)}
       {:error, %Clickhousex.Error{}} = error ->
@@ -42,9 +46,14 @@ defmodule ClickhouseEcto.Connection do
   @spec execute(connection :: DBConnection.t, prepared_query :: prepared, params :: [term], options :: Keyword.t) ::
             {:ok, term} | {:error, Exception.t}
   @spec execute(connection :: DBConnection.t, prepared_query :: cached, params :: [term], options :: Keyword.t) ::
-            {:ok, term} | {:error | :reset, Exception.t}
-  def execute(conn, %Query{} = query, params, options) do
-    case DBConnection.prepare_execute(conn, query, params, options) do
+          {:ok, term} | {:error | :reset, Exception.t}
+  def execute(conn, %Query{statement: prepared_statement} = prepared_query, params, options) do
+    statement = sanitise_query(prepared_statement)
+    ordered_params = order_params(prepared_statement, params)
+
+    query = %{prepared_query | statement: statement}
+
+    case DBConnection.prepare_execute(conn, query, ordered_params, options) do
       {:ok, _query, result} ->
         {:ok, process_rows(result, options)}
       {:error, %Clickhousex.Error{}} = error ->
@@ -103,4 +112,31 @@ defmodule ClickhouseEcto.Connection do
 
   ## Migration
   def execute_ddl(command), do: ClickhouseEcto.Migration.execute_ddl(command)
+
+  defp order_params(query, params) do
+    sanitised = Regex.replace(~r/(([^\\]|^))["'].*?[^\\]['"]/, query, "\\g{1}")
+
+    ordering =
+      ~r/\?([0-9]+)/
+      |> Regex.scan(sanitised)
+      |> Enum.map(fn [_, x] -> String.to_integer(x) end)
+
+    if length(ordering) != length(params) do
+      raise "Error: number of params received (#{length(params)}) does not match expected (#{length(ordering)})"
+    end
+
+    ordered_params =
+      ordering
+      |> Enum.reduce([], fn ix, acc -> [Enum.at(params, ix) | acc] end)
+      |> Enum.reverse()
+
+    case ordered_params do
+      [] -> params
+      _ -> ordered_params
+    end
+  end
+
+  defp sanitise_query(query) do
+    String.replace(query, ~r/(\?([0-9]+))(?=(?:[^\\"']|[\\"'][^\\"']*[\\"'])*$)/, "?")
+  end
 end

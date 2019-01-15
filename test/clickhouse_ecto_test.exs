@@ -121,6 +121,9 @@ defmodule ClickhouseEctoTest do
 
     query = Schema |> offset([r], 5) |> limit([r], 3) |> select([], true) |> normalize
     assert all(query) == ~s{SELECT 'TRUE' FROM "schema" AS s0 LIMIT 5, 3}
+
+    query = Schema |> offset([r], ^5) |> limit([r], ^3) |> select([], true) |> normalize
+    assert all(query) == ~s{SELECT 'TRUE' FROM "schema" AS s0 LIMIT ?1, ?0}
   end
 
   test "string escape" do
@@ -165,11 +168,11 @@ defmodule ClickhouseEctoTest do
     assert all(query) == ~s{SELECT lcase(s0."x") FROM "schema" AS s0}
 
     query = Schema |> select([r], r.x) |> where([], fragment("? = \"query\\?\"", ^10)) |> normalize
-    assert all(query) == ~s{SELECT s0."x" FROM "schema" AS s0 WHERE (? = \"query?\")}
+    assert all(query) == ~s{SELECT s0."x" FROM "schema" AS s0 WHERE (?0 = \"query?\")}
 
     value = 13
     query = Schema |> select([r], fragment("lcase(?, ?)", r.x, ^value)) |> normalize
-    assert all(query) == ~s{SELECT lcase(s0."x", ?) FROM "schema" AS s0}
+    assert all(query) == ~s{SELECT lcase(s0."x", ?0) FROM "schema" AS s0}
 
     query = Schema |> select([], fragment(title: 2)) |> normalize
     assert_raise Ecto.QueryError, fn ->
@@ -196,18 +199,18 @@ defmodule ClickhouseEctoTest do
 
   test "tagged type" do
     query = Schema |> select([], type(^"601d74e4-a8d3-4b6e-8365-eddb4c893327", Ecto.UUID)) |> normalize
-    assert all(query) == ~s{SELECT CAST(? AS FixedString(36)) FROM "schema" AS s0}
+    assert all(query) == ~s{SELECT CAST(?0 AS FixedString(36)) FROM "schema" AS s0}
   end
 
   test "string type" do
     query = Schema |> select([], type(^"test", :string)) |> normalize
-    assert all(query) == ~s{SELECT CAST(? AS String) FROM "schema" AS s0}
+    assert all(query) == ~s{SELECT CAST(?0 AS String) FROM "schema" AS s0}
   end
 
   test "nested expressions" do
     z = 123
     query = from(r in Schema, []) |> select([r], r.x > 0 and (r.y > ^(-z)) or true) |> normalize
-    assert all(query) == ~s{SELECT ((s0."x" > 0) AND (s0."y" > ?)) OR 1 FROM "schema" AS s0}
+    assert all(query) == ~s{SELECT ((s0."x" > 0) AND (s0."y" > ?0)) OR 1 FROM "schema" AS s0}
   end
 
   test "in expression" do
@@ -221,16 +224,16 @@ defmodule ClickhouseEctoTest do
     assert all(query) == ~s{SELECT 0=1 FROM "schema" AS s0}
 
     query = Schema |> select([e], 1 in ^[1, 2, 3]) |> normalize
-    assert all(query) == ~s{SELECT 1 IN (?,?,?) FROM "schema" AS s0}
+    assert all(query) == ~s{SELECT 1 IN (?0,?1,?2) FROM "schema" AS s0}
 
     query = Schema |> select([e], 1 in [1, ^2, 3]) |> normalize
-    assert all(query) == ~s{SELECT 1 IN (1,?,3) FROM "schema" AS s0}
+    assert all(query) == ~s{SELECT 1 IN (1,?0,3) FROM "schema" AS s0}
 
     query = Schema |> select([e], 1 in fragment("foo")) |> normalize
     assert all(query) == ~s{SELECT 1 = ANY(foo) FROM "schema" AS s0}
 
-    query = Schema |> select([e], e.x == ^0 or e.x in ^[1, 2, 3] or e.x == ^4) |> normalize
-    assert all(query) == ~s{SELECT ((s0."x" = ?) OR (s0."x" IN (?,?,?))) OR (s0."x" = ?) FROM "schema" AS s0}
+    query = Schema |> select([e], e.x == ^0 or e.x in ^[1, 2, 3] or e.x == ^4) |> normalize()
+    assert all(query) == ~s{SELECT ((s0."x" = ?0) OR (s0."x" IN (?1,?2,?3))) OR (s0."x" = ?4) FROM "schema" AS s0}
   end
 
   test "having" do
@@ -279,9 +282,9 @@ defmodule ClickhouseEctoTest do
             |> normalize
 
     result =
-      ~s{SELECT s0."id", ? FROM "schema" AS s0 } <>
-      ~s{WHERE (?) AND (?) GROUP BY ?, ? HAVING (?) AND (?) } <>
-      ~s{ORDER BY ?, s0."x" LIMIT ?, ?}
+      ~s{SELECT s0."id", ?0 FROM "schema" AS s0 } <>
+      ~s{WHERE (?1) AND (?2) GROUP BY ?3, ?4 HAVING (?5) AND (?6) } <>
+      ~s{ORDER BY ?7, s0."x" LIMIT ?9, ?8}
 
     assert all(query) == String.trim(result)
   end
